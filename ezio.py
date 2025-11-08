@@ -8,7 +8,6 @@ try:
 except Exception as e:
     raise ImportError("keystone-engine is required for assemble(). pip install keystone-engine") from e
 
-
 BytesLike = Union[bytes, bytearray, memoryview]
 
 def p16(x:int)->bytes: return struct.pack("<H", x & 0xFFFF)
@@ -57,7 +56,41 @@ class Remote:
         return self.send(bytes(data)+b"\n")
     def recv(self,n:int=4096)->bytes:
         if self._sock is None: raise RuntimeError("Socket is closed")
-        return self._sock.recv(n)
+        sock=self._sock
+        original_to=sock.gettimeout()
+        deadline=None if self.timeout is None else time.time()+self.timeout
+        idle=0.03
+        buf=bytearray()
+        try:
+            while True:
+                if deadline is None:
+                    per=idle
+                else:
+                    rem=deadline-time.time()
+                    if rem<=0: break
+                    per=min(idle, max(rem, 0))
+                try:
+                    sock.settimeout(per)
+                except Exception:
+                    pass
+                want=4096
+                try:
+                    chunk=sock.recv(want)
+                    if not chunk:
+                        break
+                    buf+=chunk
+                    if n>0 and len(buf)>=n:
+                        break
+                except socket.timeout:
+                    break
+        finally:
+            try:
+                sock.settimeout(original_to)
+            except Exception:
+                pass
+        if n>0:
+            return bytes(buf[:n])
+        return bytes(buf)
     def recvuntil(self,delim:BytesLike,max_bytes:Optional[int]=None)->bytes:
         if self._sock is None: raise RuntimeError("Socket is closed")
         d=bytes(delim); buf=bytearray()
@@ -119,10 +152,45 @@ class Process:
                     self._cv.wait(rem)
             return len(self._buf)>=want
     def recv(self,n:int=4096, timeout:Optional[float]=None)->bytes:
-        self._wait_for(1, timeout if timeout is not None else self.timeout)
+        eff_timeout = self.timeout if timeout is None else timeout
+        self._wait_for(1, eff_timeout)
+        idle=0.03
+        deadline=None if eff_timeout is None else time.time()+eff_timeout
         with self._cv:
-            if n<=0 or not self._buf: return b""
-            out=bytes(self._buf[:n]); del self._buf[:n]; return out
+            last_len=-1
+            while True:
+                cur_len=len(self._buf)
+                if cur_len==0 and self._eof:
+                    break
+                if cur_len==last_len:
+                    if deadline is not None:
+                        rem=deadline-time.time()
+                        if rem<=0:
+                            break
+                        self._cv.wait(min(idle, max(rem,0)))
+                    else:
+                        self._cv.wait(idle)
+                    if len(self._buf)==cur_len:
+                        break
+                    else:
+                        last_len=-1
+                        continue
+                else:
+                    last_len=cur_len
+                    if deadline is not None:
+                        rem=deadline-time.time()
+                        if rem<=0:
+                            break
+                        self._cv.wait(min(idle, max(rem,0)))
+                    else:
+                        self._cv.wait(idle)
+            if n<=0:
+                out=bytes(self._buf)
+                self._buf.clear()
+                return out
+            out=bytes(self._buf[:n])
+            del self._buf[:len(out)]
+            return out
     def recvuntil(self,delim:BytesLike, max_bytes:Optional[int]=None, timeout:Optional[float]=None)->bytes:
         d=bytes(delim)
         end=None if (timeout if timeout is not None else self.timeout) is None else time.time()+(timeout if timeout is not None else self.timeout)
@@ -165,7 +233,8 @@ class Process:
             try:
                 self._p.wait(timeout=0.2)
             except Exception:
-                try: self._p.kill()
+                try:
+                    self._p.kill()
                 except Exception: pass
 
 def process(args:Union[str,List[str]], timeout:Optional[float]=5.0)->Process:
@@ -186,7 +255,6 @@ class Asm:
         self._mode = None
         self._syntax = None
         self.set_context(arch, bits, syntax)
-
     def set_context(self, arch: str = "x86", bits: int = 32, syntax: str = "intel"):
         arch = arch.lower()
         syntax = syntax.lower()
@@ -198,7 +266,6 @@ class Asm:
         self._mode = {16: KS_MODE_16, 32: KS_MODE_32, 64: KS_MODE_64}[bits]
         self._syntax = {"intel": KS_OPT_SYNTAX_INTEL, "att": KS_OPT_SYNTAX_ATT}[syntax]
         return self
-
     def assemble(self, src: Union[str, bytes]) -> bytes:
         if isinstance(src, bytes):
             src = src.decode("utf-8", "ignore")
