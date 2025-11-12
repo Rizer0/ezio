@@ -1,8 +1,9 @@
-import socket, struct, subprocess, threading, time
+import socket, struct, subprocess, threading, time, re
 from typing import Optional, Union, Iterable, Tuple, List
 try:
     from keystone import (
-        Ks, KS_ARCH_X86, KS_MODE_16, KS_MODE_32, KS_MODE_64,
+        Ks, KsError,
+        KS_ARCH_X86, KS_MODE_16, KS_MODE_32, KS_MODE_64,
         KS_OPT_SYNTAX_INTEL, KS_OPT_SYNTAX_ATT
     )
 except Exception as e:
