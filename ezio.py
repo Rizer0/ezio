@@ -255,24 +255,87 @@ class Asm:
         self._mode = None
         self._syntax = None
         self.set_context(arch, bits, syntax)
+
     def set_context(self, arch: str = "x86", bits: int = 32, syntax: str = "intel"):
         arch = arch.lower()
         syntax = syntax.lower()
+
         if arch != "x86":
             raise ValueError("Only x86/x86_64 supported. Use arch='x86' with bits=16/32/64.")
         if bits not in (16, 32, 64):
             raise ValueError("bits must be 16, 32, or 64")
+
         self._arch = KS_ARCH_X86
         self._mode = {16: KS_MODE_16, 32: KS_MODE_32, 64: KS_MODE_64}[bits]
-        self._syntax = {"intel": KS_OPT_SYNTAX_INTEL, "att": KS_OPT_SYNTAX_ATT}[syntax]
+        self._syntax = {"intel": KS_OPT_SYNTAX_INTEL, "att": KS_OPT_SYNTAX_ATT}.get(syntax, KS_OPT_SYNTAX_INTEL)
         return self
+
+    def _parse_imm_token(self, tok: str) -> Optional[int]:
+
+        if not tok:
+            return None
+        tok = tok.strip()
+        if tok.startswith('$'):
+            tok = tok[1:]
+        tok = tok.strip("() ")
+        if not tok:
+            return None
+        try:
+            if tok.lower().startswith("0x") or tok.lower().startswith("-0x"):
+                return int(tok, 16)
+            return int(tok, 10)
+        except ValueError:
+            try:
+                return int(tok, 0)
+            except Exception:
+                return None
+
+    def _fallback_encode(self, src: str) -> Optional[bytes]:
+
+        s = src.strip().lower()
+
+
+        m = re.search(r'(?:\.byte|db|byte)\s+([0-9x,\s\-]+)', s)
+        if m:
+            parts = [p.strip() for p in m.group(1).split(',') if p.strip()]
+            try:
+                out = bytes(int(p, 0) & 0xff for p in parts)
+                return out
+            except Exception:
+                pass
+
+        m = re.match(r'jmp\s+short\s+(.+)', s)
+        if m:
+            imm_tok = m.group(1).strip()
+            imm = self._parse_imm_token(imm_tok)
+            if imm is None:
+                t2 = re.match(r'\$(-?\w+)', imm_tok)
+                if t2:
+                    imm = self._parse_imm_token(t2.group(1))
+            if imm is not None:
+                imm8 = imm & 0xff
+                return bytes([0xEB, imm8])
+
+        m2 = re.match(r'jmp\s+(0x[0-9a-f]+)$', s)
+        if m2:
+            return None
+
+        return None
+
     def assemble(self, src: Union[str, bytes]) -> bytes:
         if isinstance(src, bytes):
             src = src.decode("utf-8", "ignore")
+        src = src.strip()
         ks = Ks(self._arch, self._mode)
         ks.syntax = self._syntax
-        enc, _ = ks.asm(src)
-        return bytes(enc)
+        try:
+            enc, _ = ks.asm(src)
+            return bytes(enc)
+        except KsError as e:
+            fb = self._fallback_encode(src)
+            if fb is not None:
+                return fb
+            raise RuntimeError(f"Keystone failed to assemble and fallback couldn't handle it: {e}") from e
 
 _default_asm = Asm()
 
