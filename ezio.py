@@ -11,13 +11,29 @@ except Exception as e:
 
 BytesLike = Union[bytes, bytearray, memoryview]
 
-def p16(x:int)->bytes: return struct.pack("<H", x & 0xFFFF)
-def p32(x:int)->bytes: return struct.pack("<I", x & 0xFFFFFFFF)
-def p64(x:int)->bytes: return struct.pack("<Q", x & 0xFFFFFFFFFFFFFFFF)
+def p16(x: int, endian: str = 'little') -> bytes:
+    fmt = '<H' if endian == 'little' else '>H'
+    return struct.pack(fmt, x & 0xFFFF)
 
-def u16(b:BytesLike)->int: return struct.unpack("<H", bytes(b))[0]
-def u32(b:BytesLike)->int: return struct.unpack("<I", bytes(b))[0]
-def u64(b:BytesLike)->int: return struct.unpack("<Q", bytes(b))[0]
+def p32(x: int, endian: str = 'little') -> bytes:
+    fmt = '<I' if endian == 'little' else '>I'
+    return struct.pack(fmt, x & 0xFFFFFFFF)
+
+def p64(x: int, endian: str = 'little') -> bytes:
+    fmt = '<Q' if endian == 'little' else '>Q'
+    return struct.pack(fmt, x & 0xFFFFFFFFFFFFFFFF)
+
+def u16(b: BytesLike, endian: str = 'little') -> int:
+    fmt = '<H' if endian == 'little' else '>H'
+    return struct.unpack(fmt, bytes(b))[0]
+
+def u32(b: BytesLike, endian: str = 'little') -> int:
+    fmt = '<I' if endian == 'little' else '>I'
+    return struct.unpack(fmt, bytes(b))[0]
+
+def u64(b: BytesLike, endian: str = 'little') -> int:
+    fmt = '<Q' if endian == 'little' else '>Q'
+    return struct.unpack(fmt, bytes(b))[0]
 
 def flat(*items: Iterable[Union[int,str,BytesLike]], word_size:int=4)->bytes:
     out=bytearray()
@@ -347,3 +363,4 @@ def assemble(src: Union[str, bytes], arch: Optional[str] = None, bits: Optional[
 
 def set_asm_context(arch: str = "x86", bits: int = 32, syntax: str = "intel") -> None:
     _default_asm.set_context(arch, bits, syntax)
+
